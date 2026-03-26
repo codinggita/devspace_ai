@@ -1,30 +1,47 @@
-const nodemailer = require('nodemailer');
+// Using native fetch for the Brevo HTTP API to bypass Render's SMTP port blocks
 const { getEnvConfig } = require('../config/env');
 
 const config = getEnvConfig();
 
-const transporter = nodemailer.createTransport({
-    service: config.emailService || 'gmail',
-    auth: {
-        user: config.emailUser || 'devspace.ai.sprint@gmail.com',
-        pass: config.emailPass || 'your-app-password'
-    }
-});
+// Read Brevo API key (it's the same as the SMTP pass)
+const apiKey = config.emailPass || process.env.EMAIL_PASS;
+// The sender email should be the user's registered Brevo email
+const senderEmail = config.emailUser || process.env.EMAIL_USER || 'srr0607378@gmail.com'; 
 
 async function sendEmail({ to, subject, html, text }) {
-    const mailOptions = {
-        from: `"DevSpace" <${config.emailUser || 'devspace.ai.sprint@gmail.com'}>`,
-        to,
-        subject,
-        html,
-        text
+    if (!apiKey) {
+        console.error('Email Error: Missing EMAIL_PASS (Brevo API Key) in environment variables.');
+        return false;
+    }
+
+    const payload = {
+        sender: { name: "DevSpace", email: senderEmail },
+        to: [{ email: to }],
+        subject: subject,
+        htmlContent: html,
+        textContent: text || 'Please view this email in an HTML-compatible client.'
     };
 
     try {
-        await transporter.sendMail(mailOptions);
+        const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+            method: 'POST',
+            headers: {
+                'accept': 'application/json',
+                'api-key': apiKey,
+                'content-type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error('Brevo API Error:', errorData);
+            return false;
+        }
+
         return true;
     } catch (error) {
-        console.error('Email Error:', error.message);
+        console.error('Email Dispatch HTTP Error:', error.message);
         return false;
     }
 }
@@ -59,7 +76,9 @@ async function sendOTPEmail(email, otp) {
 }
 
 async function sendInvitationEmail(email, projectName, inviteToken) {
-    const inviteUrl = `http://localhost:5173/accept-invitation/${inviteToken}`;
+    // Determine the base URL dynamically or fallback to localhost for development
+    const baseUrl = config.frontendUrl || process.env.VITE_API_BASE_URL?.replace('/api', '') || 'http://localhost:5173';
+    const inviteUrl = `${baseUrl}/accept-invitation/${inviteToken}`;
     console.log(`\n[DEV SECURITY] Invite URL for ${email}: ${inviteUrl}\n`);
 
     const html = `
